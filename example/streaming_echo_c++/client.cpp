@@ -27,16 +27,40 @@ DEFINE_bool(send_attachment, true, "Carry attachment along with requests");
 DEFINE_string(connection_type, "", "Connection type. Available values: single, pooled, short");
 DEFINE_string(server, "0.0.0.0:8001", "IP Address of server");
 DEFINE_int32(timeout_ms, 100, "RPC timeout in milliseconds");
-DEFINE_int32(max_retry, 3, "Max retries(not including the first RPC)"); 
+DEFINE_int32(max_retry, 3, "Max retries(not including the first RPC)");
 
-int main(int argc, char* argv[]) {
+// 接收消息都要继承自这个类, 用于设置收到消息之后的动作
+class ClientStreamReceiver : public brpc::StreamInputHandler {
+public:
+    virtual int on_received_messages(brpc::StreamId id,
+                                     butil::IOBuf *const messages[],
+                                     size_t size) {
+        std::ostringstream os;
+        for (size_t i = 0; i < size; ++i) {
+            os << "msg[" << i << "]=" << *messages[i] ;
+        }
+        LOG(INFO) << "从 Server 收到的消息=" << id << ": " << os.str() ;
+        return 0;
+    }
+
+    virtual void on_idle_timeout(brpc::StreamId id) {
+        LOG(INFO) << "Server Stream=" << id << " has no data transmission for a while";
+    }
+
+    virtual void on_closed(brpc::StreamId id) {
+        LOG(INFO) << "Server Stream=" << id << " is closed";
+    }
+
+};
+
+int main(int argc, char *argv[]) {
     // Parse gflags. We recommend you to use gflags as well.
     GFLAGS_NS::ParseCommandLineFlags(&argc, &argv, true);
 
     // A Channel represents a communication line to a Server. Notice that 
     // Channel is thread-safe and can be shared by all threads in your program.
     brpc::Channel channel;
-        
+
     // Initialize the channel, NULL means using default options. 
     brpc::ChannelOptions options;
     options.protocol = brpc::PROTOCOL_BAIDU_STD;
@@ -53,7 +77,13 @@ int main(int argc, char* argv[]) {
     example::EchoService_Stub stub(&channel);
     brpc::Controller cntl;
     brpc::StreamId stream;
-    if (brpc::StreamCreate(&stream, cntl, NULL) != 0) {
+
+    // 这里加入接收 Server 消息的处理逻辑
+    ClientStreamReceiver clientStreamReceiver;
+    brpc::StreamOptions streamOptions;
+    streamOptions.handler = &clientStreamReceiver;
+
+    if (brpc::StreamCreate(&stream, cntl, &streamOptions) != 0) {
         LOG(ERROR) << "Fail to create stream";
         return -1;
     }
@@ -66,13 +96,13 @@ int main(int argc, char* argv[]) {
         LOG(ERROR) << "Fail to connect stream, " << cntl.ErrorText();
         return -1;
     }
-    
+
     while (!brpc::IsAskedToQuit()) {
         butil::IOBuf msg1;
-        msg1.append("abcdefghijklmnopqrstuvwxyz");
+        msg1.append("消息 1");
         CHECK_EQ(0, brpc::StreamWrite(stream, msg1));
         butil::IOBuf msg2;
-        msg2.append("0123456789");
+        msg2.append("消息 2");
         CHECK_EQ(0, brpc::StreamWrite(stream, msg2));
         sleep(1);
     }

@@ -26,23 +26,36 @@
 DEFINE_bool(send_attachment, true, "Carry attachment along with response");
 DEFINE_int32(port, 8001, "TCP Port of this server");
 DEFINE_int32(idle_timeout_s, -1, "Connection will be closed if there is no "
-             "read/write operations during the last `idle_timeout_s'");
+                                 "read/write operations during the last `idle_timeout_s'");
 
 class StreamReceiver : public brpc::StreamInputHandler {
 public:
-    virtual int on_received_messages(brpc::StreamId id, 
-                                     butil::IOBuf *const messages[], 
+    virtual int on_received_messages(brpc::StreamId id,
+                                     butil::IOBuf *const messages[],
                                      size_t size) {
         std::ostringstream os;
         for (size_t i = 0; i < size; ++i) {
-            os << "msg[" << i << "]=" << *messages[i];
+            os << "msg[" << i << "]=" << *messages[i] ;
         }
-        LOG(INFO) << "Received from Stream=" << id << ": " << os.str();
+        LOG(INFO) << "从 client 收到的消息=" << id << ": " << os.str() ;
+        butil::IOBuf msg1;
+        msg1.append("server 通过流式协议向 client 发送消息");
+        CHECK_EQ(0, brpc::StreamWrite(id, msg1));
+
+        butil::IOBuf msg2;
+        msg2.append("server 向 client 发送 Hello");
+        CHECK_EQ(0, brpc::StreamWrite(id, msg2));
+
+        butil::IOBuf msg3;
+        msg3.append("server 向 client 发送 World");
+        CHECK_EQ(0, brpc::StreamWrite(id, msg3));
         return 0;
     }
+
     virtual void on_idle_timeout(brpc::StreamId id) {
         LOG(INFO) << "Stream=" << id << " has no data transmission for a while";
     }
+
     virtual void on_closed(brpc::StreamId id) {
         LOG(INFO) << "Stream=" << id << " is closed";
     }
@@ -53,19 +66,21 @@ public:
 class StreamingEchoService : public example::EchoService {
 public:
     StreamingEchoService() : _sd(brpc::INVALID_STREAM_ID) {}
+
     virtual ~StreamingEchoService() {
         brpc::StreamClose(_sd);
     };
-    virtual void Echo(google::protobuf::RpcController* controller,
-                      const example::EchoRequest* /*request*/,
-                      example::EchoResponse* response,
-                      google::protobuf::Closure* done) {
+
+    virtual void Echo(google::protobuf::RpcController *controller,
+                      const example::EchoRequest * /*request*/,
+                      example::EchoResponse *response,
+                      google::protobuf::Closure *done) {
         // This object helps you to call done->Run() in RAII style. If you need
         // to process the request asynchronously, pass done_guard.release().
         brpc::ClosureGuard done_guard(done);
 
-        brpc::Controller* cntl =
-            static_cast<brpc::Controller*>(controller);
+        brpc::Controller *cntl =
+                static_cast<brpc::Controller *>(controller);
         brpc::StreamOptions stream_options;
         stream_options.handler = &_receiver;
         if (brpc::StreamAccept(&_sd, *cntl, &stream_options) != 0) {
@@ -80,7 +95,7 @@ private:
     brpc::StreamId _sd;
 };
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
     // Parse gflags. We recommend you to use gflags as well.
     GFLAGS_NS::ParseCommandLineFlags(&argc, &argv, true);
 
@@ -93,7 +108,7 @@ int main(int argc, char* argv[]) {
     // Add the service into server. Notice the second parameter, because the
     // service is put on stack, we don't want server to delete it, otherwise
     // use brpc::SERVER_OWNS_SERVICE.
-    if (server.AddService(&echo_service_impl, 
+    if (server.AddService(&echo_service_impl,
                           brpc::SERVER_DOESNT_OWN_SERVICE) != 0) {
         LOG(ERROR) << "Fail to add service";
         return -1;
